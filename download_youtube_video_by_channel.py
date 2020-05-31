@@ -143,13 +143,13 @@ def generate_download_list():
             video_basic_info_list = youtube.playlistItems().list(playlistId = playlist_id, 
                                                                  part = 'snippet', 
                                                                  pageToken = next_page_token, 
-                                                                 # Only grabbing the increment videos list after the last downloading except for the first time.
-                                                                 publishedAfter = download_start_time, 
-                                                                 maxResults = 50).execute()['items']
+                                                                 maxResults = 50).execute()
 
             video_dict = {}
-            for item in video_basic_info_list:
-                video_dict[item['snippet']['resourceId']['videoId']] = item['snippet']['title'].replace(':', '').replace(',', '').replace('.', '').replace('#', '').replace('?', '').replace('!', '').replace('\'','') + VIDEO_FORMAT
+            for item in video_basic_info_list['items']:
+                # Only grabbing the increment videos list after the last downloading except for the first time.
+                if ((download_start_time == DEFAULT_DOWNLOAD_START_TIME) or (item['snippet']['publishedAt'] > download_start_time)): 
+                    video_dict[item['snippet']['resourceId']['videoId']] = item['snippet']['title'].replace(':', '').replace(',', '').replace('.', '').replace('#', '').replace('?', '').replace('!', '').replace('\'','') + VIDEO_FORMAT
 
             # Getting videos' id and duration.
             # quota cost: videos.list(1 unit) + return 'contentDetails' part(2 units) = 3 units

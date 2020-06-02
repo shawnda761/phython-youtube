@@ -12,6 +12,7 @@ DEFAULT_DOWNLOAD_FLAG = False
 DEFAULT_DOWNLOAD_START_TIME = '1970-01-01T00:00:00Z'
 DOWNLOAD_LIST_FILE_NAME = 'download_list.txt'
 DOWNLOAD_RETRY_DESCRIPTION = ['st', 'nd', 'rd', 'th']
+DOWNLOAD_FILE_PREFIX_STR = '[{0}] '
 # Default retry times
 DOWNLOAD_RETRY_TIMES = 3
 ENTER_STR = '\r\n'
@@ -31,7 +32,7 @@ def download_videos(generate_download_list_flag=True):
     if generate_download_list_flag:
         generate_download_list()
 
-    current_retry_times = 0
+    current_retry_times, warn_dict = 0, {}
     # Looping by retry times.
     while current_retry_times <= DOWNLOAD_RETRY_TIMES:
         with open(download_list_file, 'r', encoding=FILE_ENCODING) as existed_file:
@@ -64,15 +65,18 @@ def download_videos(generate_download_list_flag=True):
                     os.rename(current_download_video_file, current_download_video_file_name)
 
                     # Estimating the download result through calculate the downloaded file's duration and the original file's duration.
-                    if (abs(VideoFileClip(current_download_video_file_name).duration) - time_convert(line.split(LINE_SPLIT_STR)[-2]) < 1):
+                    if ((abs(VideoFileClip(current_download_video_file_name).duration - time_convert(line.split(LINE_SPLIT_STR)[-2])) < 1) or (str(current_line_number) in warn_dict and (warn_dict[str(current_line_number)] == VideoFileClip(current_download_video_file_name).duration))):
                         lines[current_line_number] = line[: -len(line.split(LINE_SPLIT_STR)[-1])] + str(not DEFAULT_DOWNLOAD_FLAG) + ENTER_STR
                         current_download_number += 1
                         print('Download ---  %s  --- Done!' % line.split(LINE_SPLIT_STR)[1])
+                        if (str(current_line_number) in warn_dict and (warn_dict[str(current_line_number)] == VideoFileClip(current_download_video_file_name).duration)):
+                            del warn_dict[str(current_line_number)]
                         with open(download_list_file, 'w', encoding=FILE_ENCODING) as wirtten_file:
                             wirtten_file.write(''.join(lines))
                     else:
+                        warn_dict[str(current_line_number)] = VideoFileClip(current_download_video_file_name).duration
                         os.remove(current_download_video_file_name)
-                        print('Download --- %s --- Failed, System will try it again!' % line.split(LINE_SPLIT_STR)[1])
+                        print('Download ---  %s  --- Failed, System will try it again!' % line.split(LINE_SPLIT_STR)[1])
                 except Exception as e: 
                     print("Some Error happend while downloading files! %s" % e)
                     break
@@ -101,7 +105,7 @@ def generate_download_list():
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
 
-    init_flag, update_flag, channel_id, playlist_id, download_start_time, download_list = False, True, '', '', '', ['']
+    init_flag, update_flag, channel_id, playlist_id, download_start_time, download_list = False, True, '', '', '', []
     current_datetime = time.time()
     # File existed.
     if os.path.exists(download_list_file):
@@ -120,7 +124,7 @@ def generate_download_list():
                 line = line.strip(ENTER_STR)
                 download_list.append(line[: -len(line.split(LINE_SPLIT_STR)[-1])])
                 # Comparing the difference of video clips duration.
-                download_list.append(video_download_status(os.path.join(download_dir, line.split(LINE_SPLIT_STR)[1]), line.split(LINE_SPLIT_STR)[2]))
+                download_list.append(video_download_status(line.split(LINE_SPLIT_STR)[1], line.split(LINE_SPLIT_STR)[2]))
                 download_list.append(ENTER_STR) 
             update_flag = False
     else:
@@ -149,21 +153,22 @@ def generate_download_list():
             for item in video_basic_info_list['items']:
                 # Only grabbing the increment videos list after the last downloading except for the first time.
                 if ((download_start_time == DEFAULT_DOWNLOAD_START_TIME) or (item['snippet']['publishedAt'] > download_start_time)): 
-                    video_dict[item['snippet']['resourceId']['videoId']] = item['snippet']['title'].replace(':', '').replace(',', '').replace('.', '').replace('#', '').replace('?', '').replace('!', '').replace('\'','') + VIDEO_FORMAT
+                    video_dict[item['snippet']['resourceId']['videoId']] = DOWNLOAD_FILE_PREFIX_STR.format(item['snippet']['publishedAt'].replace(':', '-')) + item['snippet']['title'].replace('/', ' ').replace(':', '').replace(',', '').replace('.', '').replace('#', '').replace('?', '').replace('!', '').replace('\'','') + VIDEO_FORMAT
 
             # Getting videos' id and duration.
             # quota cost: videos.list(1 unit) + return 'contentDetails' part(2 units) = 3 units
             video_extra_info_list = youtube.videos().list(id = ','.join(video_dict.keys()), 
                                                           part='contentDetails', 
-                                                          maxResults = 50).execute()['items']
-            for item in video_extra_info_list:
+                                                          maxResults = 50).execute()
+
+            for item in video_extra_info_list['items']:
                 download_list.append(item['id'])
                 download_list.append(LINE_SPLIT_STR)
                 download_list.append(video_dict[item['id']])
                 download_list.append(LINE_SPLIT_STR)
                 download_list.append(item['contentDetails']['duration'])
                 download_list.append(LINE_SPLIT_STR)
-                download_list.append(video_download_status(os.path.join(download_dir, video_dict[item['id']]), item['contentDetails']['duration']))
+                download_list.append(video_download_status(video_dict[item['id']], item['contentDetails']['duration']))
                 download_list.append(ENTER_STR)                 
 
             next_page_token = video_basic_info_list.get('nextPageToken')
@@ -190,6 +195,7 @@ def generate_download_list():
 
 # Estimating video clip downloading status.
 def video_download_status(video_file_name, video_duration):
+    video_file_name = os.path.join(download_dir, video_file_name)
     if ((not os.path.exists(video_file_name)) or (abs(VideoFileClip(video_file_name).duration - time_convert(video_duration)) > 1)):
         return str(DEFAULT_DOWNLOAD_FLAG)
     else:
